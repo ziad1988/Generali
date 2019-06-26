@@ -46,6 +46,11 @@ def gini_normalized(a, p):
     return gini(a, p) / gini(a, a)
 
 
+#%%#
+INSEE_data = pd.read_excel("MDB-INSEE-V2.xls")
+
+#%%#
+Code_Postale = pd.read_csv('correspondance-code-insee-code-postal.csv', error_bad_lines=False , sep = ';')
 
 
 #%%#
@@ -220,3 +225,70 @@ train_total['Insee_enc'] = target_encoder(train_total , 'Insee' , 'target')
 #3. Insee
 #4.superficie_enc
 #5.Insee_enc
+
+
+#%% 
+#Drop Unamed and Identifiant and superficief and Insee
+train_total[train_total['Insee'].isna()].target.value_counts(dropna=False)
+
+#%%
+train_total[train_total['Insee'].isna()].superficief.value_counts(dropna=False)
+train_total = train_total.dropna()
+
+
+#%%
+
+Code_Postale = Code_Postale[['Code INSEE' , 'Code Postal']]
+train_code = pd.merge(Code_Postale , train_total, how  = 'right', left_on='Code INSEE', right_on='Insee')
+
+
+#%%
+
+#%%
+Insee_columns = ['CODGEO' , 'Orientation Economique' , 'Indice Démographique' , 'Population' , 'Nb Résidences Principales', 'Score Croissance Population'  , 'SEG Environnement Démographique Obsolète' , 'Nb Actifs Non Salariés']
+
+#%%
+train_Insee = pd.merge(INSEE_data[Insee_columns] , train_total, how  = 'right', left_on='CODGEO', right_on='Insee')
+
+#%% 
+train_Insee = train_Insee.drop(columns = ['Unnamed: 0_y' , 'superficief' , 'Unnamed: 0_x' , 'Identifiant' ] , axis =1)
+
+#%%
+train_Insee.isna().sum()
+
+
+#%%
+from xgboost import XGBClassifier
+
+alg = XGBClassifier(learning_rate=0.1, n_estimators=140, max_depth=5,
+                        min_child_weight=3, gamma=0.2, subsample=0.6, colsample_bytree=1.0,
+                        objective='binary:logistic', nthread=4, scale_pos_weight=1, seed=27)
+
+
+
+#%%
+from sklearn.model_selection import GridSearchCV
+# Create the parameter grid based on the results of random search 
+param_grid = {
+    'bootstrap': [True],
+    'max_depth': [6, 8, 10, 12],
+    'max_features': [2, 3],
+    'min_samples_leaf': [3, 4, 5],
+    'min_samples_split': [8, 10, 12],
+    'n_estimators': [100, 200, 300, 1000]
+}
+# Create a based model
+rf = RandomForestClassifier( class_weight= 'balanced' ) 
+# Instantiate the grid search model
+grid_search = GridSearchCV(estimator = rf, param_grid = param_grid, 
+                          cv = 3, n_jobs = -1, verbose = 2)
+
+#%%
+
+X_train = train_Insee.drop(columns = ['Insee' , 'target' , 'CODGEO' , 'Orientation Economique' , 'SEG Environnement Démographique Obsolète'] , axis = 1)
+X_train['EXPO'] = pd.to_numeric(X_train['EXPO'] , errors='coerce')
+y_train = train_Insee['target']
+#%%
+grid_search.fit(X_train, y_train)
+
+#%%
