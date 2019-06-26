@@ -285,10 +285,94 @@ grid_search = GridSearchCV(estimator = rf, param_grid = param_grid,
 
 #%%
 
-X_train = train_Insee.drop(columns = ['Insee' , 'target' , 'CODGEO' , 'Orientation Economique' , 'SEG Environnement Démographique Obsolète'] , axis = 1)
+X_train = train_Insee.drop(columns = ['Insee'  , 'CODGEO' , 'Orientation Economique' , 'SEG Environnement Démographique Obsolète'] , axis = 1)
 X_train['EXPO'] = pd.to_numeric(X_train['EXPO'] , errors='coerce')
-y_train = train_Insee['target']
+X_train['ft_22_categ'] = X_train['ft_22_categ'].fillna(X_train['ft_22_categ'].mean())
+X_train['EXPO'] = X_train['EXPO'].fillna(X_train['EXPO'].mean())
+X_train = X_train.dropna(subset = ['superficief_enc' , 'Population'])
+y_train = X_train['target']
+X_train = X_train.drop(columns = 'target' , axis =1)
 #%%
 grid_search.fit(X_train, y_train)
 
 #%%
+grid_search.best_params_
+
+#%%
+#
+
+#grid_search.best_params_grid_
+#{'bootstrap': True,
+ #'max_depth': 12,
+ #'max_features': 3,
+ #'min_samples_leaf': 3,
+ #'min_samples_split': 8,
+ #'n_estimators': 1000}
+
+
+#%%
+clf = RandomForestClassifier(max_depth=12 , max_features=3 , min_samples_leaf=3 , min_samples_split=8 , bootstrap= True  , n_estimators=1000 , class_weight= 'balanced')
+
+#%%
+clf.fit(X_train , y_train)
+
+#%%
+from sklearn.model_selection import cross_val_predict
+from sklearn import metrics
+
+
+pred_cv_label = cross_val_predict(clf, X_train, np.ravel(y_train),scoring=gini_sklearn,
+                             cv=10, n_jobs=-1)
+
+#%%
+def ginic(actual, pred):
+    actual = np.asarray(actual) #In case, someone passes Series or list
+    n = len(actual)
+    a_s = actual[np.argsort(pred)]
+    a_c = a_s.cumsum()
+    giniSum = a_c.sum() / a_s.sum() - (n + 1) / 2.0
+    return giniSum / n
+ 
+def gini_normalizedc(a, p):
+    if p.ndim == 2:#Required for sklearn wrapper
+        p = p[:,1] #If proba array contains proba for both 0 and 1 classes, just pick class 1
+    return ginic(a, p) / ginic(a, a)
+
+gini_sklearn = metrics.make_scorer(gini_normalizedc, True, True)
+from sklearn.model_selection import cross_val_score
+from sklearn.model_selection import StratifiedKFold
+
+cv_1 = StratifiedKFold(n_splits=5, random_state=1).split(X_train, y_train)
+
+#Check cross validation scores
+cross_val_score(clf, X_train, y_train, cv=cv_1, scoring=gini_sklearn, verbose=1, n_jobs=-1)
+
+#%%
+
+
+test_X  = pd.read_csv('X_test.csv' )
+
+
+
+#%%
+test_total = MultiColumnLabelEncoder(columns = Label_encoder_columns).fit_transform(train_X)
+
+
+#%%
+
+test_total['superficief_enc'] = train_total['superficief_enc'].fit_transform(test_X['superficief'])
+#test_total['Insee_enc'] = target_encoder.fit_transform(test['Insee'])
+
+
+test_Insee = pd.merge(INSEE_data[Insee_columns] , test_total, how  = 'right', left_on='CODGEO', right_on='Insee')
+#https://medium.com/@pouryaayria/k-fold-target-encoding-dfe9a594874b
+#%% 
+test_Insee = test_Insee.drop(columns = ['Unnamed: 0_y' , 'superficief' , 'Unnamed: 0_x' , 'Identifiant' ] , axis =1)
+
+#%% 
+X_test = test_Insee.drop(columns = ['Insee'  , 'CODGEO' , 'Orientation Economique' , 'SEG Environnement Démographique Obsolète'] , axis = 1)
+X_test['EXPO'] = pd.to_numeric(X_test['EXPO'] , errors='coerce')
+X_test['ft_22_categ'] = X_test['ft_22_categ'].fillna(X_test['ft_22_categ'].mean())
+X_test['EXPO'] = X_test['EXPO'].fillna(X_test['EXPO'].mean())
+X_test = X_test.dropna(subset = ['superficief_enc' , 'Population'])
+
