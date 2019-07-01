@@ -29,6 +29,7 @@ from sklearn.feature_selection import VarianceThreshold
 from sklearn.feature_selection import SelectFromModel
 from sklearn.utils import shuffle
 from sklearn.ensemble import RandomForestClassifier
+import pandas_profiling
 
 
 #%%#
@@ -45,84 +46,10 @@ def gini(actual, pred, cmpcol = 0, sortcol = 1):
 def gini_normalized(a, p):
     return gini(a, p) / gini(a, a)
 
-
-#%%#
-INSEE_data = pd.read_excel("MDB-INSEE-V2.xls")
-
-#%%#
-Code_Postale = pd.read_csv('correspondance-code-insee-code-postal.csv', error_bad_lines=False , sep = ';')
+gini_sklearn = metrics.make_scorer(gini_normalized, True, True)
 
 
 #%%#
-
-train_X = pd.read_csv('X_train.csv' )
-train_y = pd.read_csv('y_train_saegPGl.csv' )
-
-#%%#
-import pandas_profiling
-pandas_profiling.ProfileReport(train_X)
-
-#%%
-import matplotlib.pyplot as plt
-# create figure and axis
-fig, ax = plt.subplots()
-# plot histogram
-ax.hist(train_y['target'])
-# set title and labels
-ax.set_title('Target Distribution')
-ax.set_xlabel('Points')
-ax.set_ylabel('Frequency')
-
-
-
-
-#%%
-data = []
-for f in train_X.columns:
-    # Defining the role
-    if f == 'target':
-        role = 'target'
-    elif f == 'id':
-        role = 'id'
-    else:
-        role = 'input'
-         
-    # Defining the level
-    if 'bin' in f or f == 'target':
-        level = 'binary'
-    elif 'cat' in f or f == 'id':
-        level = 'nominal'
-    elif train_X[f].dtype == float:
-        level = 'interval'
-    elif train_X[f].dtype == int:
-        level = 'ordinal'
-        
-    # Initialize keep to True for all variables except for id
-    keep = True
-    if f == 'id':
-        keep = False
-    
-    # Defining the data type 
-    dtype = train_X[f].dtype
-    
-    # Creating a Dict that contains all the metadata for the variable
-    f_dict = {
-        'varname': f,
-        'role': role,
-        'level': level,
-        'keep': keep,
-        'dtype': dtype
-    }
-    data.append(f_dict)
-    
-meta = pd.DataFrame(data, columns=['varname', 'role', 'level', 'keep', 'dtype'])
-meta.set_index('varname', inplace=True)
-
-
-
-
-
-#%%
 def target_encoder(df, column, target, index=None, method='mean'):
     """
     Target-based encoding is numerization of a categorical variables via the target variable. Main purpose is to deal
@@ -151,6 +78,17 @@ def target_encoder(df, column, target, index=None, method='mean'):
         raise ValueError("Incorrect method supplied: '{}'. Must be one of 'mean', 'median', 'std'".format(method))
 
     return encoded_column
+
+
+#%%
+
+def myfillna(series):
+    if series.dtype is pd.np.dtype(float):
+        return series.fillna(0)
+    elif series.dtype is pd.np.dtype(object):
+        return series.fillna('missing')
+    else:
+        return series
 
 
 
@@ -182,21 +120,34 @@ class MultiColumnLabelEncoder:
     def fit_transform(self,X,y=None):
         return self.fit(X,y).transform(X)
 
+#%%#
+INSEE_data = pd.read_excel("MDB-INSEE-V2.xls")
+
+#%%#
+Code_Postale = pd.read_csv('correspondance-code-insee-code-postal.csv', error_bad_lines=False , sep = ';')
+
+
+#%%#
+
+train_X = pd.read_csv('X_train.csv' )
+train_y = pd.read_csv('y_train_saegPGl.csv' )
+
+#%%#
+
+pandas_profiling.ProfileReport(train_X)
 
 #%%
+import matplotlib.pyplot as plt
+# create figure and axis
+fig, ax = plt.subplots()
+# plot histogram
+ax.hist(train_y['target'])
+# set title and labels
+ax.set_title('Target Distribution')
+ax.set_xlabel('Points')
+ax.set_ylabel('Frequency')
 
-def myfillna(series):
-    if series.dtype is pd.np.dtype(float):
-        return series.fillna(0)
-    elif series.dtype is pd.np.dtype(object):
-        return series.fillna('missing')
-    else:
-        return series
 
-
-#%%
-Lesion_fill = Lesion1.apply(myfillna)
-Lesion_fill.isna().sum()
 
 
 #%%
@@ -209,12 +160,6 @@ train_Label_Encoder = MultiColumnLabelEncoder(columns = Label_encoder_columns).f
 
 #%%
 train_total  = pd.merge(train_Label_Encoder, train_y, on=['Identifiant', 'Identifiant'])
-
-
-#%%
-
-train_total['superficief_enc'] = target_encoder(train_total , 'superficief' , 'target')
-train_total['Insee_enc'] = target_encoder(train_total , 'Insee' , 'target')
 
 
 
@@ -230,12 +175,42 @@ train_total['Insee_enc'] = target_encoder(train_total , 'Insee' , 'target')
 #%% 
 #Drop Unamed and Identifiant and superficief and Insee
 train_total[train_total['Insee'].isna()].target.value_counts(dropna=False)
+train_total[train_total['Insee'].isna()].superficief.value_counts(dropna=False)
 
 #%%
-train_total[train_total['Insee'].isna()].superficief.value_counts(dropna=False)
-train_total = train_total.dropna()
+#Insee and superficief are linked with NAN values , we can drop all the missing values from there and look at the 
+train_total = train_total.dropna(subset = ['Insee' , 'superficief'])
+train_total['ft_22_categ'] = train_total['ft_22_categ'].fillna(train_total['ft_22_categ'].median())
+
+#%%
+train_total['EXPO'] = train_total['EXPO'].str.replace("," ,".")
+train_total['EXPO'] = pd.to_numeric(train_total['EXPO'])
+
+#%%
+train_total = train_total.drop(columns = ['Identifiant' , 'Unnamed: 0_x' , 'Insee'  , 'Unnamed: 0_y'] , axis =1)
 
 
+
+#%%
+
+X_train_xgb = train_total.drop(columns = 'target' , axis = 1)
+y_train_xgb = train_total['target']
+
+
+alg = XGBClassifier(learning_rate=0.1, n_estimators=140, max_depth=5,
+                        min_child_weight=3, gamma=0.2, subsample=0.6, colsample_bytree=1.0,
+                        objective='binary:logistic', nthread=4, scale_pos_weight=1, seed=27)
+
+
+
+
+
+#%%
+
+cv_1 = StratifiedKFold(n_splits=10, random_state=1).split(X_train, y_train)
+
+#Check cross validation scores
+cross_val_score(alg, X_train_xgb, y_train_xgb, cv=cv_1, scoring=gini_sklearn,  verbose=1, n_jobs=-1)
 #%%
 
 Code_Postale = Code_Postale[['Code INSEE' , 'Code Postal']]
@@ -258,11 +233,6 @@ train_Insee.isna().sum()
 
 
 #%%
-from xgboost import XGBClassifier
-
-alg = XGBClassifier(learning_rate=0.1, n_estimators=140, max_depth=5,
-                        min_child_weight=3, gamma=0.2, subsample=0.6, colsample_bytree=1.0,
-                        objective='binary:logistic', nthread=4, scale_pos_weight=1, seed=27)
 
 
 
@@ -281,15 +251,17 @@ param_grid = {
 rf = RandomForestClassifier( class_weight= 'balanced' ) 
 # Instantiate the grid search model
 grid_search = GridSearchCV(estimator = rf, param_grid = param_grid, 
-                          cv = 3, n_jobs = -1, verbose = 2)
+                          cv = 3, n_jobs = -1, verbose = 2 , scoring = gini_sklearn)
 
 #%%
 
-X_train = train_Insee.drop(columns = ['Insee'  , 'CODGEO' , 'Orientation Economique' , 'SEG Environnement Démographique Obsolète'] , axis = 1)
-X_train['EXPO'] = pd.to_numeric(X_train['EXPO'] , errors='coerce')
+X_train = train_Insee.drop(columns = ['Unnamed: 0_x',
+       'Identifiant','superficief_enc','Insee_enc' ,'Insee'  , 'CODGEO' , 'Orientation Economique' , 'SEG Environnement Démographique Obsolète' , 'Unnamed: 0_y'] , axis = 1)
+X_train['EXPO'] = X_train['EXPO'].str.replace("," ,".")
+X_train['EXPO'] = pd.to_numeric(X_train['EXPO'])
 X_train['ft_22_categ'] = X_train['ft_22_categ'].fillna(X_train['ft_22_categ'].mean())
-X_train['EXPO'] = X_train['EXPO'].fillna(X_train['EXPO'].mean())
-X_train = X_train.dropna(subset = ['superficief_enc' , 'Population'])
+X_train['superficief'] = X_train['superficief'].fillna(X_train['superficief'].mean())
+X_train = X_train.dropna(subset = ['Population'])
 y_train = X_train['target']
 X_train = X_train.drop(columns = 'target' , axis =1)
 #%%
@@ -301,6 +273,14 @@ grid_search.best_params_
 #%%
 #
 
+
+
+
+
+steps = [('scaler', StandardScaler()), ('SVM', SVC())]
+from sklearn.pipeline import Pipeline
+pipeline = Pipeline(steps) # define the pipeline object.
+
 #grid_search.best_params_grid_
 #{'bootstrap': True,
  #'max_depth': 12,
@@ -311,41 +291,26 @@ grid_search.best_params_
 
 
 #%%
-clf = RandomForestClassifier(max_depth=12 , max_features=3 , min_samples_leaf=3 , min_samples_split=8 , bootstrap= True  , n_estimators=1000 , class_weight= 'balanced')
+clf = RandomForestClassifier(max_depth=6 , max_features=2 , min_samples_leaf=5 , min_samples_split=10 , bootstrap= True  , n_estimators=100, class_weight= 'balanced')
+
 
 #%%
-clf.fit(X_train , y_train)
+from sklearn.preprocessing import StandardScaler  
+feature_scaler = StandardScaler()  
+X_train = feature_scaler.fit_transform(X_train)  
+
 
 #%%
-from sklearn.model_selection import cross_val_predict
-from sklearn import metrics
 
 
-pred_cv_label = cross_val_predict(clf, X_train, np.ravel(y_train),scoring=gini_sklearn,
-                             cv=10, n_jobs=-1)
 
-#%%
-def ginic(actual, pred):
-    actual = np.asarray(actual) #In case, someone passes Series or list
-    n = len(actual)
-    a_s = actual[np.argsort(pred)]
-    a_c = a_s.cumsum()
-    giniSum = a_c.sum() / a_s.sum() - (n + 1) / 2.0
-    return giniSum / n
- 
-def gini_normalizedc(a, p):
-    if p.ndim == 2:#Required for sklearn wrapper
-        p = p[:,1] #If proba array contains proba for both 0 and 1 classes, just pick class 1
-    return ginic(a, p) / ginic(a, a)
-
-gini_sklearn = metrics.make_scorer(gini_normalizedc, True, True)
 from sklearn.model_selection import cross_val_score
 from sklearn.model_selection import StratifiedKFold
 
-cv_1 = StratifiedKFold(n_splits=5, random_state=1).split(X_train, y_train)
+cv_1 = StratifiedKFold(n_splits=10, random_state=1).split(X_train, y_train)
 
 #Check cross validation scores
-cross_val_score(clf, X_train, y_train, cv=cv_1, scoring=gini_sklearn, verbose=1, n_jobs=-1)
+cross_val_score(clf, X_train, y_train, cv=cv_1, scoring=gini_sklearn,  verbose=1, n_jobs=-1)
 
 #%%
 
@@ -355,24 +320,38 @@ test_X  = pd.read_csv('X_test.csv' )
 
 
 #%%
-test_total = MultiColumnLabelEncoder(columns = Label_encoder_columns).fit_transform(train_X)
+test_total = MultiColumnLabelEncoder(columns = Label_encoder_columns).fit_transform(test_X)
 
 
 #%%
 
-test_total['superficief_enc'] = train_total['superficief_enc'].fit_transform(test_X['superficief'])
+#test_total['superficief_enc'] = train_total['superficief_enc'].fit_transform(test_X['superficief'])
 #test_total['Insee_enc'] = target_encoder.fit_transform(test['Insee'])
 
 
 test_Insee = pd.merge(INSEE_data[Insee_columns] , test_total, how  = 'right', left_on='CODGEO', right_on='Insee')
 #https://medium.com/@pouryaayria/k-fold-target-encoding-dfe9a594874b
 #%% 
-test_Insee = test_Insee.drop(columns = ['Unnamed: 0_y' , 'superficief' , 'Unnamed: 0_x' , 'Identifiant' ] , axis =1)
+test_Insee = test_Insee.drop(columns = ['Unnamed: 0' , 'superficief' , 'Identifiant' ] , axis =1)
 
 #%% 
 X_test = test_Insee.drop(columns = ['Insee'  , 'CODGEO' , 'Orientation Economique' , 'SEG Environnement Démographique Obsolète'] , axis = 1)
 X_test['EXPO'] = pd.to_numeric(X_test['EXPO'] , errors='coerce')
 X_test['ft_22_categ'] = X_test['ft_22_categ'].fillna(X_test['ft_22_categ'].mean())
 X_test['EXPO'] = X_test['EXPO'].fillna(X_test['EXPO'].mean())
-X_test = X_test.dropna(subset = ['superficief_enc' , 'Population'])
+#X_test = X_test.dropna(subset = [ 'Population'])
+X_test['Population'] = X_test['Population'].fillna(X_test['Population'].median())
+X_test = X_test.fillna(X_test.mean())
 
+
+
+#%%
+
+
+y_pred = clf.predict(X_test)
+#%%
+output=pd.DataFrame(data={"id":test_X["Unnamed: 0"],"target":y_pred})
+
+output.to_csv('prediction.csv' , index = False)
+
+#%%
