@@ -128,6 +128,13 @@ Code_Postale = pd.read_csv('correspondance-code-insee-code-postal.csv', error_ba
 
 
 #%%#
+chomage  = pd.read_excel("sl_cho_2019T1.xls" , sheet_name = "Département" , header = 3)
+chomageT1 = chomage[['Code', 'T1_2019']]
+#%%#
+flux_mobilite  = pd.read_excel("base-excel-flux-mobilite-residentielle-2016.xls" , header = 5)
+
+
+#%%#
 
 train_X = pd.read_csv('X_train.csv' )
 train_y = pd.read_csv('y_train_saegPGl.csv' )
@@ -147,8 +154,8 @@ ax.set_title('Target Distribution')
 ax.set_xlabel('Points')
 ax.set_ylabel('Frequency')
 
-
-
+#%%
+train_X['Code'] = train_X['Insee'].str[0:2]
 
 #%%
 Label_encoder_columns = [ 'ft_5_categ', 'ft_6_categ', 'ft_7_categ', 'ft_8_categ', 'ft_9_categ',
@@ -187,13 +194,13 @@ train_total['EXPO'] = train_total['EXPO'].str.replace("," ,".")
 train_total['EXPO'] = pd.to_numeric(train_total['EXPO'])
 
 #%%
-train_total = train_total.drop(columns = ['Identifiant' , 'Unnamed: 0_x' , 'Insee'  , 'Unnamed: 0_y'] , axis =1)
+train_total = train_total.drop(columns = ['Identifiant' , 'Unnamed: 0_x'  , 'Unnamed: 0_y'] , axis =1)
 
 
 
 #%%
 
-X_train_xgb = train_total.drop(columns = 'target' , axis = 1)
+X_train_xgb = train_total.drop(columns = ['target' ,  'Insee' , 'Code'] , axis = 1)
 y_train_xgb = train_total['target']
 
 
@@ -211,28 +218,22 @@ cv_1 = StratifiedKFold(n_splits=10, random_state=1).split(X_train, y_train)
 
 #Check cross validation scores
 cross_val_score(alg, X_train_xgb, y_train_xgb, cv=cv_1, scoring=gini_sklearn,  verbose=1, n_jobs=-1)
-#%%
-
-Code_Postale = Code_Postale[['Code INSEE' , 'Code Postal']]
-train_code = pd.merge(Code_Postale , train_total, how  = 'right', left_on='Code INSEE', right_on='Insee')
 
 
-#%%
 
-#%%
-Insee_columns = ['CODGEO' , 'Orientation Economique' , 'Indice Démographique' , 'Population' , 'Nb Résidences Principales', 'Score Croissance Population'  , 'SEG Environnement Démographique Obsolète' , 'Nb Actifs Non Salariés']
 
-#%%
-train_Insee = pd.merge(INSEE_data[Insee_columns] , train_total, how  = 'right', left_on='CODGEO', right_on='Insee')
+#%% [markdown]
+# Now we can add information about the INSEE code by geographical and economical point of view
+# CHOMAGE
 
-#%% 
-train_Insee = train_Insee.drop(columns = ['Unnamed: 0_y' , 'superficief' , 'Unnamed: 0_x' , 'Identifiant' ] , axis =1)
+train_Chomage = pd.merge(chomageT1, train_total, how  = 'right', left_on='Code', right_on='Code')
+
+
+train_Mobilité = pd.merge( flux_mobilite , train_Chomage ,  how  = 'right', left_on='CODGEO', right_on='Insee')
 
 #%%
-train_Insee.isna().sum()
-
-
-#%%
+#Insee_columns = ['CODGEO' , 'Orientation Economique' , 'Indice Démographique' , 'Population' , 'Nb Résidences Principales', 'Score Croissance Population'  , 'SEG Environnement Démographique Obsolète' , 'Nb Actifs Non Salariés']
+#train_Insee = pd.merge(INSEE_data[Insee_columns] , train_total, how  = 'right', left_on='CODGEO', right_on='Insee')
 
 
 
@@ -255,66 +256,36 @@ grid_search = GridSearchCV(estimator = rf, param_grid = param_grid,
 
 #%%
 
-X_train = train_Insee.drop(columns = ['Unnamed: 0_x',
-       'Identifiant','superficief_enc','Insee_enc' ,'Insee'  , 'CODGEO' , 'Orientation Economique' , 'SEG Environnement Démographique Obsolète' , 'Unnamed: 0_y'] , axis = 1)
-X_train['EXPO'] = X_train['EXPO'].str.replace("," ,".")
-X_train['EXPO'] = pd.to_numeric(X_train['EXPO'])
-X_train['ft_22_categ'] = X_train['ft_22_categ'].fillna(X_train['ft_22_categ'].mean())
-X_train['superficief'] = X_train['superficief'].fillna(X_train['superficief'].mean())
-X_train = X_train.dropna(subset = ['Population'])
-y_train = X_train['target']
-X_train = X_train.drop(columns = 'target' , axis =1)
+X_train_rf = train_Mobilité.drop(columns = ['LIBGEO', 'Insee' , 'Code', 'target' , 'CODGEO'] , axis = 1)
+X_train_rf = X_train_rf.fillna(0)
+y_train_rf = train_Mobilité['target']
+
 #%%
-grid_search.fit(X_train, y_train)
+grid_search.fit(X_train_rf, y_train_rf)
 
 #%%
 grid_search.best_params_
 
-#%%
-#
-
-
-
-
-
-steps = [('scaler', StandardScaler()), ('SVM', SVC())]
-from sklearn.pipeline import Pipeline
-pipeline = Pipeline(steps) # define the pipeline object.
-
-#grid_search.best_params_grid_
-#{'bootstrap': True,
- #'max_depth': 12,
- #'max_features': 3,
- #'min_samples_leaf': 3,
- #'min_samples_split': 8,
- #'n_estimators': 1000}
 
 
 #%%
-clf = RandomForestClassifier(max_depth=6 , max_features=2 , min_samples_leaf=5 , min_samples_split=10 , bootstrap= True  , n_estimators=100, class_weight= 'balanced')
+clf = RandomForestClassifier(max_depth=6 , max_features=3 , min_samples_leaf=3 , min_samples_split=8 , bootstrap= True  , n_estimators=300)
 
 
-#%%
-from sklearn.preprocessing import StandardScaler  
-feature_scaler = StandardScaler()  
-X_train = feature_scaler.fit_transform(X_train)  
+
 
 
 #%%
 
-
-
-from sklearn.model_selection import cross_val_score
-from sklearn.model_selection import StratifiedKFold
-
-cv_1 = StratifiedKFold(n_splits=10, random_state=1).split(X_train, y_train)
-
+cv_1 = StratifiedKFold(n_splits=10, random_state=1).split(X_train_rf, y_train_rf)
+#%%
 #Check cross validation scores
-cross_val_score(clf, X_train, y_train, cv=cv_1, scoring=gini_sklearn,  verbose=1, n_jobs=-1)
+cross_val_score(clf, X_train_rf, y_train_rf, cv=cv_1, scoring=gini_sklearn,  verbose=1, n_jobs=-1)
+#%%
+cross_val_score(alg, X_train_rf, y_train_rf, cv=cv_1, scoring=gini_sklearn,  verbose=1, n_jobs=-1)
+
 
 #%%
-
-
 test_X  = pd.read_csv('X_test.csv' )
 
 
@@ -328,30 +299,38 @@ test_total = MultiColumnLabelEncoder(columns = Label_encoder_columns).fit_transf
 #test_total['superficief_enc'] = train_total['superficief_enc'].fit_transform(test_X['superficief'])
 #test_total['Insee_enc'] = target_encoder.fit_transform(test['Insee'])
 
+test_total[test_total['Insee'].isna()].superficief.value_counts(dropna=False)
 
-test_Insee = pd.merge(INSEE_data[Insee_columns] , test_total, how  = 'right', left_on='CODGEO', right_on='Insee')
-#https://medium.com/@pouryaayria/k-fold-target-encoding-dfe9a594874b
-#%% 
-test_Insee = test_Insee.drop(columns = ['Unnamed: 0' , 'superficief' , 'Identifiant' ] , axis =1)
+#%%
+#Insee and superficief are linked with NAN values , we can drop all the missing values from there and look at the 
+test_total = test_total.dropna(subset = ['Insee' , 'superficief'])
+test_total['ft_22_categ'] = test_total['ft_22_categ'].fillna(test_total['ft_22_categ'].median())
 
-#%% 
-X_test = test_Insee.drop(columns = ['Insee'  , 'CODGEO' , 'Orientation Economique' , 'SEG Environnement Démographique Obsolète'] , axis = 1)
-X_test['EXPO'] = pd.to_numeric(X_test['EXPO'] , errors='coerce')
-X_test['ft_22_categ'] = X_test['ft_22_categ'].fillna(X_test['ft_22_categ'].mean())
-X_test['EXPO'] = X_test['EXPO'].fillna(X_test['EXPO'].mean())
-#X_test = X_test.dropna(subset = [ 'Population'])
-X_test['Population'] = X_test['Population'].fillna(X_test['Population'].median())
-X_test = X_test.fillna(X_test.mean())
+#%%
+test_total['EXPO'] = test_total['EXPO'].str.replace("," ,".")
+test_total['EXPO'] = pd.to_numeric(test_total['EXPO'])
 
+#%%
+test_total = test_total.drop(columns = ['Identifiant' , 'Unnamed: 0'  , 'Insee'] , axis =1)
 
 
 #%%
 
 
-y_pred = clf.predict(X_test)
+y_pred = alg.predict(test_total)
 #%%
-output=pd.DataFrame(data={"id":test_X["Unnamed: 0"],"target":y_pred})
+output=pd.DataFrame(data={"target":y_pred})
 
-output.to_csv('prediction.csv' , index = False)
+output.to_csv('prediction_xgb.csv' , index = False)
+
+#%%
+
+ziad = pd.read_excel("prediction_xgb_ziad.xls" , delimiter= ";" , header =0)
+
+#%%
+ziad.to_csv('prediction_xgb_ziad2.csv'  , sep ="," , index = False)
+
+#%%
+ziad1 = pd.read_csv("prediction_xgb_ziad1.csv" , delimiter= "," , index_col= 0)
 
 #%%
